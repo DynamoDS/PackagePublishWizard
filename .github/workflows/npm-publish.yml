@@ -57,6 +57,9 @@ jobs:
           if [ "$PUBLISH_DRY_RUN" = "true" ]; then
             echo "PUBLISH_DRY_RUN is true: dry run only, nothing will be published."
             args+=(--dry-run)
+            # A dry run doesn't need credentials. Send none, so a missing or stale NPM_TOKEN can't fail it.
+            # Empty rather than unset: the .npmrc written by setup-node references ${NODE_AUTH_TOKEN}.
+            export NODE_AUTH_TOKEN=""
           fi
           npm publish "./$TARBALL" "${args[@]}"
         env:
