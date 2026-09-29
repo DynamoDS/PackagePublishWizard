@@ -1,0 +1,63 @@
+# Publishes the prebuilt @dynamods/dynamo-pm-wizard tarball attached to a GitHub release.
+# The package is built on the internal Autodesk CI (its source and dependencies are internal);
+# that build creates the release and attaches the tarball. Nothing is built here.
+
+name: Publish release
+
+on:
+  release:
+    types: [published]
+  # Re-run a publish for an existing release, e.g. after fixing a token problem.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.0.28)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish-npm:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      # Repository variable; set to 'true' to verify a release without publishing it.
+      PUBLISH_DRY_RUN: ${{ vars.PUBLISH_DRY_RUN }}
+    steps:
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+      - name: Download the release tarball
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.tgz'
+      - name: Check the tarball matches the release
+        run: |
+          shopt -s nullglob
+          files=(*.tgz)
+          if [ ${#files[@]} -ne 1 ]; then
+            echo "Expected exactly one .tgz asset on $TAG, found ${#files[@]}"
+            exit 1
+          fi
+          name=$(tar -xOzf "${files[0]}" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0)).name')
+          version=$(tar -xOzf "${files[0]}" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0)).version')
+          if [ "$name" != "@dynamods/dynamo-pm-wizard" ]; then
+            echo "Unexpected package name '$name'"
+            exit 1
+          fi
+          if [ "v$version" != "$TAG" ]; then
+            echo "Tarball version $version does not match release tag $TAG"
+            exit 1
+          fi
+          echo "TARBALL=${files[0]}" >> "$GITHUB_ENV"
+      - name: Publish to npmjs.org
+        run: |
+          args=(--access public)
+          if [ "$PUBLISH_DRY_RUN" = "true" ]; then
+            echo "PUBLISH_DRY_RUN is true: dry run only, nothing will be published."
+            args+=(--dry-run)
+          fi
+          npm publish "./$TARBALL" "${args[@]}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
